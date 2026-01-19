@@ -1,0 +1,35 @@
+{
+  "name": "opencode-antigravity-web",
+  "version": "0.1.0",
+  "description": "Web search and URL reading plugin for OpenCode using Antigravity (Google CloudCode) API",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "antigravity",
+    "google",
+    "search",
+    "web"
+  ],
+  "author": "Lorenzo Becchi (ominiverdi)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ominiverdi/opencode-antigravity-web.git"
+  },
+  "homepage": "https://github.com/ominiverdi/opencode-antigravity-web#readme",
+  "private": false,
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^22.0.0",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.1.15",
+    "opencode-antigravity-auth": "^1.2.8"
+  }
+}
