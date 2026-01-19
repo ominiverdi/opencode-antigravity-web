@@ -67,6 +67,10 @@ Read the content from https://docs.example.com/api
 - [opencode-antigravity-auth](https://github.com/NoeFabris/opencode-antigravity-auth) - Authentication (required)
 - [opencode-antigravity-img](https://github.com/ominiverdi/opencode-antigravity-img) - Image generation with Gemini
 
+## Acknowledgments
+
+This plugin was inspired by [opencode-google-antigravity-auth](https://github.com/shekohex/opencode-google-antigravity-auth) by shekohex.
+
 ## License
 
 MIT
