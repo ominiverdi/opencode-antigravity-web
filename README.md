@@ -1,5 +1,9 @@
 # opencode-antigravity-web
 
+[![npm version](https://img.shields.io/npm/v/opencode-antigravity-web.svg)](https://www.npmjs.com/package/opencode-antigravity-web)
+[![npm downloads](https://img.shields.io/npm/dm/opencode-antigravity-web.svg)](https://www.npmjs.com/package/opencode-antigravity-web)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Web search and URL reading plugin for [OpenCode](https://opencode.ai) using Antigravity (Google CloudCode) API.
 
 ## Features
