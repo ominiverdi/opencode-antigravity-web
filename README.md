@@ -9,7 +9,7 @@ Web search and URL reading plugin for [OpenCode](https://opencode.ai) using Anti
 
 ## Prerequisites
 
-This plugin requires authentication via the [opencode-antigravity-auth](https://github.com/ominiverdi/opencode-antigravity-auth) plugin.
+This plugin requires authentication via the [opencode-antigravity-auth](https://github.com/NoeFabris/opencode-antigravity-auth) plugin.
 
 ## Installation
 
@@ -64,7 +64,7 @@ Read the content from https://docs.example.com/api
 
 ## Related Plugins
 
-- [opencode-antigravity-auth](https://github.com/ominiverdi/opencode-antigravity-auth) - Authentication (required)
+- [opencode-antigravity-auth](https://github.com/NoeFabris/opencode-antigravity-auth) - Authentication (required)
 - [opencode-antigravity-img](https://github.com/ominiverdi/opencode-antigravity-img) - Image generation with Gemini
 
 ## License
