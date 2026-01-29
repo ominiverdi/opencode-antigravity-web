@@ -1,6 +1,6 @@
 {
   "name": "opencode-antigravity-web",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Web search and URL reading plugin for OpenCode using Antigravity (Google CloudCode) API",
   "main": "src/index.ts",
   "type": "module",
