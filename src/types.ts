@@ -139,3 +139,50 @@ export interface ReadUrlArgs {
   url: string;
   thinking?: boolean;
 }
+
+/**
+ * Model quota info from fetchAvailableModels
+ */
+export interface ModelQuotaInfo {
+  remainingFraction?: number;
+  resetTime?: string;
+}
+
+/**
+ * Model info from fetchAvailableModels
+ */
+export interface ModelInfo {
+  displayName?: string;
+  recommended?: boolean;
+  supportsThinking?: boolean;
+  maxTokens?: number;
+  quotaInfo?: ModelQuotaInfo;
+  model?: string;
+  apiProvider?: string;
+  modelProvider?: string;
+}
+
+/**
+ * Model sort group
+ */
+export interface ModelSortGroup {
+  modelIds?: string[];
+}
+
+/**
+ * Model sort category
+ */
+export interface ModelSort {
+  displayName?: string;
+  groups?: ModelSortGroup[];
+}
+
+/**
+ * fetchAvailableModels response
+ */
+export interface AvailableModelsResponse {
+  models?: Record<string, ModelInfo>;
+  defaultAgentModelId?: string;
+  agentModelSorts?: ModelSort[];
+  webSearchModelIds?: string[];
+}

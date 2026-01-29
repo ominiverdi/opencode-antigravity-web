@@ -10,6 +10,9 @@ Web search and URL reading plugin for [OpenCode](https://opencode.ai) using Anti
 
 - **search_web**: Search Google for documentation, error fixes, or general info with source citations
 - **read_url_content**: Fetch and read the text content of a specific URL
+- **Dynamic model selection**: Automatically fetches available models and picks the best one
+- **Smart fallback**: Tries multiple models and endpoints if one fails (capacity issues, rate limits)
+- **Quota-aware**: Skips models with exhausted quota
 
 ## Prerequisites
 
@@ -65,6 +68,27 @@ Fetch and read the text content of a specific URL.
 ```
 Read the content from https://docs.example.com/api
 ```
+
+## How It Works
+
+The plugin dynamically fetches available models from Google's CloudCode API and selects the best one based on:
+
+1. **Recommended models first** - prioritizes Google's recommended models
+2. **Quota remaining** - skips models with exhausted quota
+3. **Multiple endpoints** - tries fallback endpoints if primary fails
+
+This means the plugin automatically adapts to new models as Google releases them, without requiring updates.
+
+## Troubleshooting
+
+### "No Models Available"
+- Check your authentication with `opencode auth login`
+- Verify your Google One AI Premium subscription is active
+
+### "All Models Unavailable"
+- This usually means temporary capacity issues on Google's servers
+- The error will show which models/endpoints were tried
+- Wait a few minutes and try again
 
 ## Related Plugins
 

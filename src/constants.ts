@@ -25,13 +25,6 @@ export const CLOUDCODE_METADATA = {
   pluginType: "GEMINI",
 };
 
-// Search models - ordered from best to fallback
-export const SEARCH_MODELS = [
-  "gemini-2.5-pro",      // Top quality
-  "gemini-3-flash",      // Newer, fast
-  "gemini-2.5-flash",    // Designated for web search
-];
-
 export const SEARCH_TIMEOUT_MS = 60_000;
 export const SEARCH_THINKING_BUDGET_FAST = 4096;
 export const SEARCH_THINKING_BUDGET_DEEP = 16384;

@@ -5,7 +5,6 @@ import {
   CLOUDCODE_ENDPOINTS,
   CLOUDCODE_HEADERS,
   CLOUDCODE_METADATA,
-  SEARCH_MODELS,
   SEARCH_TIMEOUT_MS,
   SEARCH_THINKING_BUDGET_FAST,
   SEARCH_THINKING_BUDGET_DEEP,
@@ -15,6 +14,7 @@ import type {
   TokenResponse,
   LoadCodeAssistResponse,
   AntigravitySearchResponse,
+  AvailableModelsResponse,
   SearchResult,
   SearchArgs,
   ReadUrlArgs,
@@ -77,6 +77,84 @@ export function extractProjectId(project: string | { id?: string } | undefined):
   if (!project) return undefined;
   if (typeof project === "string") return project;
   return project.id;
+}
+
+/**
+ * Fetch available models from CloudCode API
+ */
+export async function fetchAvailableModels(accessToken: string): Promise<AvailableModelsResponse | null> {
+  for (const endpoint of CLOUDCODE_ENDPOINTS) {
+    try {
+      const response = await fetch(`${endpoint}/v1internal:fetchAvailableModels`, {
+        method: "POST",
+        headers: {
+          ...CLOUDCODE_HEADERS,
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({}),
+      });
+
+      if (response.ok) {
+        return (await response.json()) as AvailableModelsResponse;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/**
+ * Get sorted list of models to try for search/URL reading
+ * Priority: recommended models with quota > 0, sorted by quota remaining
+ * Returns empty array if no models available (caller should handle this)
+ */
+export function getSearchModels(modelsResponse: AvailableModelsResponse | null): string[] {
+  if (!modelsResponse?.models) {
+    return [];
+  }
+
+  const models = modelsResponse.models;
+  
+  // Get recommended model order from agentModelSorts
+  const recommendedOrder = modelsResponse.agentModelSorts?.[0]?.groups?.[0]?.modelIds || [];
+  
+  // Build list of models with their info
+  const modelList: Array<{ id: string; quota: number; isRecommended: boolean; order: number }> = [];
+  
+  for (const [modelId, info] of Object.entries(models)) {
+    const quota = info.quotaInfo?.remainingFraction ?? 0;
+    
+    // Skip models with no quota
+    if (quota <= 0) continue;
+    
+    // Skip internal/non-agent models
+    if (modelId.startsWith("chat_") || modelId.startsWith("tab_")) continue;
+    
+    const order = recommendedOrder.indexOf(modelId);
+    modelList.push({
+      id: modelId,
+      quota,
+      isRecommended: info.recommended === true,
+      order: order >= 0 ? order : 999,
+    });
+  }
+
+  // Sort: recommended first, then by order in recommended list, then by quota
+  modelList.sort((a, b) => {
+    // Recommended models first
+    if (a.isRecommended !== b.isRecommended) {
+      return a.isRecommended ? -1 : 1;
+    }
+    // Then by order in recommended list
+    if (a.order !== b.order) {
+      return a.order - b.order;
+    }
+    // Then by quota remaining
+    return b.quota - a.quota;
+  });
+
+  return modelList.map(m => m.id);
 }
 
 /**
@@ -245,6 +323,17 @@ export async function executeSearch(
       return formatSearchError("Configuration Error", "Could not determine project ID. Please re-authenticate.");
     }
 
+    // Fetch available models dynamically
+    const modelsResponse = await fetchAvailableModels(accessToken);
+    const searchModels = getSearchModels(modelsResponse);
+
+    if (searchModels.length === 0) {
+      return formatSearchError(
+        "No Models Available",
+        "Could not fetch available models from the API. Please try again later or check your authentication."
+      );
+    }
+
     const { query, urls, thinking = true } = args;
 
     // Build prompt
@@ -264,7 +353,7 @@ export async function executeSearch(
     const thinkingBudget = thinking ? SEARCH_THINKING_BUDGET_DEEP : SEARCH_THINKING_BUDGET_FAST;
 
     // Try each model with each endpoint
-    for (const model of SEARCH_MODELS) {
+    for (const model of searchModels) {
       for (const endpoint of CLOUDCODE_ENDPOINTS) {
         try {
           const requestPayload = {
@@ -427,11 +516,22 @@ export async function readUrlContent(
       return formatSearchError("Configuration Error", "Could not determine project ID. Please re-authenticate.");
     }
 
+    // Fetch available models dynamically
+    const modelsResponse = await fetchAvailableModels(accessToken);
+    const searchModels = getSearchModels(modelsResponse);
+
+    if (searchModels.length === 0) {
+      return formatSearchError(
+        "No Models Available",
+        "Could not fetch available models from the API. Please try again later or check your authentication."
+      );
+    }
+
     const { url: targetUrl, thinking = false } = args;
     const thinkingBudget = thinking ? SEARCH_THINKING_BUDGET_DEEP : SEARCH_THINKING_BUDGET_FAST;
 
     // Try each model with each endpoint
-    for (const model of SEARCH_MODELS) {
+    for (const model of searchModels) {
       for (const endpoint of CLOUDCODE_ENDPOINTS) {
         try {
           const requestPayload = {
