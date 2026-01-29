@@ -2,10 +2,10 @@ import {
   ANTIGRAVITY_CLIENT_ID,
   ANTIGRAVITY_CLIENT_SECRET,
   GOOGLE_TOKEN_URL,
-  CLOUDCODE_BASE_URL,
+  CLOUDCODE_ENDPOINTS,
   CLOUDCODE_HEADERS,
   CLOUDCODE_METADATA,
-  SEARCH_MODEL,
+  SEARCH_MODELS,
   SEARCH_TIMEOUT_MS,
   SEARCH_THINKING_BUDGET_FAST,
   SEARCH_THINKING_BUDGET_DEEP,
@@ -49,21 +49,25 @@ export async function refreshAccessToken(refreshToken: string): Promise<string> 
  * Load code assist info to get project ID
  */
 export async function loadCodeAssist(accessToken: string): Promise<LoadCodeAssistResponse> {
-  const response = await fetch(`${CLOUDCODE_BASE_URL}/v1internal:loadCodeAssist`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      ...CLOUDCODE_HEADERS,
-    },
-    body: JSON.stringify({ metadata: CLOUDCODE_METADATA }),
-  });
+  for (const endpoint of CLOUDCODE_ENDPOINTS) {
+    try {
+      const response = await fetch(`${endpoint}/v1internal:loadCodeAssist`, {
+        method: "POST",
+        headers: {
+          ...CLOUDCODE_HEADERS,
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ metadata: CLOUDCODE_METADATA }),
+      });
 
-  if (!response.ok) {
-    throw new Error(`loadCodeAssist failed (${response.status})`);
+      if (response.ok) {
+        return (await response.json()) as LoadCodeAssistResponse;
+      }
+    } catch {
+      continue;
+    }
   }
-
-  return (await response.json()) as LoadCodeAssistResponse;
+  throw new Error("loadCodeAssist failed on all endpoints");
 }
 
 /**
@@ -209,14 +213,24 @@ Guidelines:
 - If information is uncertain or conflicting, acknowledge it
 - Focus on answering the user's question directly`;
 
+interface SearchAttemptError {
+  model: string;
+  endpoint: string;
+  status?: number;
+  reason?: string;
+  message: string;
+}
+
 /**
- * Execute a web search using CloudCode API
+ * Execute a web search using CloudCode API with model and endpoint fallback
  */
 export async function executeSearch(
   account: Account,
   args: SearchArgs,
   abortSignal?: AbortSignal
 ): Promise<string> {
+  const errors: SearchAttemptError[] = [];
+
   try {
     const accessToken = await refreshAccessToken(account.refreshToken);
 
@@ -228,7 +242,7 @@ export async function executeSearch(
     }
 
     if (!projectId) {
-      return "Error: Could not determine project ID";
+      return formatSearchError("Configuration Error", "Could not determine project ID. Please re-authenticate.");
     }
 
     const { query, urls, thinking = true } = args;
@@ -249,61 +263,135 @@ export async function executeSearch(
 
     const thinkingBudget = thinking ? SEARCH_THINKING_BUDGET_DEEP : SEARCH_THINKING_BUDGET_FAST;
 
-    const requestPayload = {
-      systemInstruction: {
-        parts: [{ text: SEARCH_SYSTEM_INSTRUCTION }],
-      },
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: prompt }],
-        },
-      ],
-      tools,
-      generationConfig: {
-        thinkingConfig: {
-          thinkingBudget,
-          includeThoughts: false,
-        },
-      },
-    };
+    // Try each model with each endpoint
+    for (const model of SEARCH_MODELS) {
+      for (const endpoint of CLOUDCODE_ENDPOINTS) {
+        try {
+          const requestPayload = {
+            systemInstruction: {
+              parts: [{ text: SEARCH_SYSTEM_INSTRUCTION }],
+            },
+            contents: [
+              {
+                role: "user",
+                parts: [{ text: prompt }],
+              },
+            ],
+            tools,
+            generationConfig: {
+              thinkingConfig: {
+                thinkingBudget,
+                includeThoughts: false,
+              },
+            },
+          };
 
-    const wrappedBody = {
-      project: projectId,
-      model: SEARCH_MODEL,
-      userAgent: "antigravity",
-      requestId: generateRequestId(),
-      request: {
-        ...requestPayload,
-        sessionId: generateSessionId(),
-      },
-    };
+          const wrappedBody = {
+            project: projectId,
+            model,
+            userAgent: "antigravity",
+            requestId: generateRequestId(),
+            request: {
+              ...requestPayload,
+              sessionId: generateSessionId(),
+            },
+          };
 
-    const url = `${CLOUDCODE_BASE_URL}/v1internal:generateContent`;
+          const response = await fetch(`${endpoint}/v1internal:generateContent`, {
+            method: "POST",
+            headers: {
+              ...CLOUDCODE_HEADERS,
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify(wrappedBody),
+            signal: abortSignal ?? AbortSignal.timeout(SEARCH_TIMEOUT_MS),
+          });
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        ...CLOUDCODE_HEADERS,
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(wrappedBody),
-      signal: abortSignal ?? AbortSignal.timeout(SEARCH_TIMEOUT_MS),
-    });
+          if (response.ok) {
+            const data = (await response.json()) as AntigravitySearchResponse;
+            const result = parseSearchResponse(data);
+            if (result.text && !result.text.startsWith("Error:")) {
+              return formatSearchResult(result);
+            }
+          }
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      return `## Search Error\n\nFailed to execute search: ${response.status} ${response.statusText}\n\n${errorText.slice(0, 500)}`;
+          // Parse error for fallback decision
+          const errorText = await response.text();
+          let errorInfo: { reason?: string; message?: string } = {};
+          try {
+            const errorJson = JSON.parse(errorText);
+            errorInfo = {
+              reason: errorJson.error?.details?.[0]?.reason,
+              message: errorJson.error?.message,
+            };
+          } catch {
+            errorInfo.message = errorText.slice(0, 200);
+          }
+
+          errors.push({
+            model,
+            endpoint: endpoint.replace("https://", "").replace(".googleapis.com", ""),
+            status: response.status,
+            reason: errorInfo.reason,
+            message: errorInfo.message || response.statusText,
+          });
+
+          // If capacity exhausted or rate limited, try next model/endpoint
+          if (response.status === 503 || response.status === 429) {
+            continue;
+          }
+
+          // For other errors (4xx), skip to next model
+          if (response.status >= 400 && response.status < 500) {
+            break;
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          errors.push({
+            model,
+            endpoint: endpoint.replace("https://", "").replace(".googleapis.com", ""),
+            message,
+          });
+          continue;
+        }
+      }
     }
 
-    const data = (await response.json()) as AntigravitySearchResponse;
-    const result = parseSearchResponse(data);
-    return formatSearchResult(result);
+    // All attempts failed
+    return formatSearchError("All Models Unavailable", buildErrorSummary(errors));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return `## Search Error\n\nFailed to execute search: ${message}`;
+    return formatSearchError("Search Failed", message);
   }
+}
+
+/**
+ * Format a search error with clear structure
+ */
+function formatSearchError(title: string, details: string): string {
+  return `## Search Error: ${title}\n\n${details}\n\n**Tip:** This is usually a temporary issue. Try again in a few minutes.`;
+}
+
+/**
+ * Build a summary of all failed attempts
+ */
+function buildErrorSummary(errors: SearchAttemptError[]): string {
+  if (errors.length === 0) {
+    return "No specific error information available.";
+  }
+
+  const lines: string[] = ["Tried the following models/endpoints:\n"];
+  
+  for (const err of errors) {
+    const status = err.status ? `(${err.status})` : "";
+    const reason = err.reason ? `[${err.reason}]` : "";
+    lines.push(`- **${err.model}** @ ${err.endpoint} ${status} ${reason}`);
+    if (err.message && !err.reason) {
+      lines.push(`  ${err.message.slice(0, 100)}`);
+    }
+  }
+
+  return lines.join("\n");
 }
 
 const READ_URL_SYSTEM_INSTRUCTION = `You are an expert content extractor. Your task is to fetch and analyze the content of the provided URL.
@@ -316,13 +404,15 @@ Guidelines:
 - Format the output in a clear, readable way`;
 
 /**
- * Read and extract content from a URL using CloudCode API
+ * Read and extract content from a URL using CloudCode API with fallback
  */
 export async function readUrlContent(
   account: Account,
   args: ReadUrlArgs,
   abortSignal?: AbortSignal
 ): Promise<string> {
+  const errors: SearchAttemptError[] = [];
+
   try {
     const accessToken = await refreshAccessToken(account.refreshToken);
 
@@ -334,79 +424,123 @@ export async function readUrlContent(
     }
 
     if (!projectId) {
-      return "Error: Could not determine project ID";
+      return formatSearchError("Configuration Error", "Could not determine project ID. Please re-authenticate.");
     }
 
     const { url: targetUrl, thinking = false } = args;
-
     const thinkingBudget = thinking ? SEARCH_THINKING_BUDGET_DEEP : SEARCH_THINKING_BUDGET_FAST;
 
-    const requestPayload = {
-      systemInstruction: {
-        parts: [{ text: READ_URL_SYSTEM_INSTRUCTION }],
-      },
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: `Fetch and extract the content from this URL: ${targetUrl}` }],
-        },
-      ],
-      tools: [{ urlContext: {} }],
-      generationConfig: {
-        thinkingConfig: {
-          thinkingBudget,
-          includeThoughts: false,
-        },
-      },
-    };
+    // Try each model with each endpoint
+    for (const model of SEARCH_MODELS) {
+      for (const endpoint of CLOUDCODE_ENDPOINTS) {
+        try {
+          const requestPayload = {
+            systemInstruction: {
+              parts: [{ text: READ_URL_SYSTEM_INSTRUCTION }],
+            },
+            contents: [
+              {
+                role: "user",
+                parts: [{ text: `Fetch and extract the content from this URL: ${targetUrl}` }],
+              },
+            ],
+            tools: [{ urlContext: {} }],
+            generationConfig: {
+              thinkingConfig: {
+                thinkingBudget,
+                includeThoughts: false,
+              },
+            },
+          };
 
-    const wrappedBody = {
-      project: projectId,
-      model: SEARCH_MODEL,
-      userAgent: "antigravity",
-      requestId: generateRequestId(),
-      request: {
-        ...requestPayload,
-        sessionId: generateSessionId(),
-      },
-    };
+          const wrappedBody = {
+            project: projectId,
+            model,
+            userAgent: "antigravity",
+            requestId: generateRequestId(),
+            request: {
+              ...requestPayload,
+              sessionId: generateSessionId(),
+            },
+          };
 
-    const apiUrl = `${CLOUDCODE_BASE_URL}/v1internal:generateContent`;
+          const response = await fetch(`${endpoint}/v1internal:generateContent`, {
+            method: "POST",
+            headers: {
+              ...CLOUDCODE_HEADERS,
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify(wrappedBody),
+            signal: abortSignal ?? AbortSignal.timeout(SEARCH_TIMEOUT_MS),
+          });
 
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        ...CLOUDCODE_HEADERS,
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(wrappedBody),
-      signal: abortSignal ?? AbortSignal.timeout(SEARCH_TIMEOUT_MS),
-    });
+          if (response.ok) {
+            const data = (await response.json()) as AntigravitySearchResponse;
+            const result = parseSearchResponse(data);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      return `## URL Read Error\n\nFailed to read URL: ${response.status} ${response.statusText}\n\n${errorText.slice(0, 500)}`;
-    }
+            if (result.text && !result.text.startsWith("Error:")) {
+              // Format specifically for URL content
+              const lines: string[] = [];
+              lines.push(`## Content from ${targetUrl}\n`);
+              lines.push(result.text);
 
-    const data = (await response.json()) as AntigravitySearchResponse;
-    const result = parseSearchResponse(data);
+              if (result.urlsRetrieved.length > 0) {
+                const urlStatus = result.urlsRetrieved[0];
+                if (urlStatus && urlStatus.status !== "URL_RETRIEVAL_STATUS_SUCCESS") {
+                  lines.push(`\n**Note:** URL retrieval status: ${urlStatus.status}`);
+                }
+              }
 
-    // Format specifically for URL content
-    const lines: string[] = [];
-    lines.push(`## Content from ${targetUrl}\n`);
-    lines.push(result.text);
+              return lines.join("\n");
+            }
+          }
 
-    if (result.urlsRetrieved.length > 0) {
-      const urlStatus = result.urlsRetrieved[0];
-      if (urlStatus && urlStatus.status !== "URL_RETRIEVAL_STATUS_SUCCESS") {
-        lines.push(`\n**Note:** URL retrieval status: ${urlStatus.status}`);
+          // Parse error for fallback decision
+          const errorText = await response.text();
+          let errorInfo: { reason?: string; message?: string } = {};
+          try {
+            const errorJson = JSON.parse(errorText);
+            errorInfo = {
+              reason: errorJson.error?.details?.[0]?.reason,
+              message: errorJson.error?.message,
+            };
+          } catch {
+            errorInfo.message = errorText.slice(0, 200);
+          }
+
+          errors.push({
+            model,
+            endpoint: endpoint.replace("https://", "").replace(".googleapis.com", ""),
+            status: response.status,
+            reason: errorInfo.reason,
+            message: errorInfo.message || response.statusText,
+          });
+
+          // If capacity exhausted or rate limited, try next
+          if (response.status === 503 || response.status === 429) {
+            continue;
+          }
+
+          // For other errors, skip to next model
+          if (response.status >= 400 && response.status < 500) {
+            break;
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          errors.push({
+            model,
+            endpoint: endpoint.replace("https://", "").replace(".googleapis.com", ""),
+            message,
+          });
+          continue;
+        }
       }
     }
 
-    return lines.join("\n");
+    // All attempts failed
+    return formatSearchError("All Models Unavailable", buildErrorSummary(errors));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return `## URL Read Error\n\nFailed to read URL: ${message}`;
+    return formatSearchError("URL Read Failed", message);
   }
 }

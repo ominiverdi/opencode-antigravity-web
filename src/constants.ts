@@ -7,13 +7,17 @@ export const ANTIGRAVITY_CLIENT_ID = "1071006060591-tmhssin2h21lcre235vtolojh4g4
 export const ANTIGRAVITY_CLIENT_SECRET = "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";
 export const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 
-// CloudCode API endpoints
-export const CLOUDCODE_BASE_URL = "https://daily-cloudcode-pa.sandbox.googleapis.com";
-export const CLOUDCODE_FALLBACK_URLS = [
+// CloudCode API endpoints (non-sandbox first for better stability)
+export const CLOUDCODE_ENDPOINTS = [
+  "https://daily-cloudcode-pa.googleapis.com",
   "https://daily-cloudcode-pa.sandbox.googleapis.com",
-  "https://autopush-cloudcode-pa.sandbox.googleapis.com",
   "https://cloudcode-pa.googleapis.com",
 ];
+
+export const CLOUDCODE_HEADERS = {
+  "User-Agent": "antigravity",
+  "Content-Type": "application/json",
+};
 
 export const CLOUDCODE_METADATA = {
   ideType: "ANTIGRAVITY",
@@ -21,14 +25,13 @@ export const CLOUDCODE_METADATA = {
   pluginType: "GEMINI",
 };
 
-export const CLOUDCODE_HEADERS = {
-  "User-Agent": "antigravity/1.11.5 windows/amd64",
-  "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
-  "Client-Metadata": '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}',
-};
+// Search models - ordered from best to fallback
+export const SEARCH_MODELS = [
+  "gemini-2.5-pro",      // Top quality
+  "gemini-3-flash",      // Newer, fast
+  "gemini-2.5-flash",    // Designated for web search
+];
 
-// Search configuration
-export const SEARCH_MODEL = "gemini-2.5-flash";
 export const SEARCH_TIMEOUT_MS = 60_000;
 export const SEARCH_THINKING_BUDGET_FAST = 4096;
 export const SEARCH_THINKING_BUDGET_DEEP = 16384;
